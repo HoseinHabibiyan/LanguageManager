@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MultiCulture", "MultiCulture\MultiCulture.csproj", "{1A41D97D-7050-4D43-A5EE-060A9ED34184}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LanguageManager", "LanguageManager\LanguageManager.csproj", "{1A41D97D-7050-4D43-A5EE-060A9ED34184}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

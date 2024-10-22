@@ -1,5 +1,6 @@
+using System.Globalization;
+using LanguageManager;
 using Microsoft.AspNetCore.Mvc;
-using MultiCulture;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -10,10 +11,19 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddMemoryCache();
 
-builder.Services.AddMultiLanguage((option) =>
+builder.Services.AddLanguageManager((option) =>
 {
     option.ResourcesPath = Path.Combine(Directory.GetCurrentDirectory(), "Resources");
-    option.Cultures = new[] { "fa", "en" };
+    option.Cultures = ["fa", "en"];
+});
+
+builder.Services.AddRequestLocalization((options) =>
+{
+    options.SupportedCultures =
+    [
+        new CultureInfo("en"),
+        new CultureInfo("fa")
+    ];
 });
 
 var app = builder.Build();
@@ -24,16 +34,14 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-app.UseHttpsRedirection();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+app.UseMultiLanguage();
+
+app.UseHttpsRedirection();
 
 app.MapGet("/", ([FromServices]ILocalization localization) =>
     {
-        localization.GetAllString();
+      return Results.Ok(localization.Get("Hi"));
     })
     .WithOpenApi();
 
