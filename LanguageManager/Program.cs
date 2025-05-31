@@ -39,10 +39,7 @@ app.UseMultiLanguage();
 
 app.UseHttpsRedirection();
 
-app.MapGet("/", ([FromServices]ILocalization localization) =>
-    {
-      return Results.Ok(localization.Get("Hi"));
-    })
+app.MapGet("/", ([FromServices]ILocalization localization , CancellationToken ct) => Results.Ok((object?)localization.Get("Hi",ct)))
     .WithOpenApi();
 
 app.Run();

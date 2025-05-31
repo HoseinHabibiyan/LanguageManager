@@ -1,88 +1,89 @@
 ﻿using System.Globalization;
 using System.Text.Json;
-using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Options;
 
 namespace LanguageManager;
 
 public static class LanguageManager
 {
-    public static void AddLanguageManager(this IServiceCollection services , Action<LanguageManagerOptions> options)
+    public static void AddLanguageManager(this IServiceCollection services, Action<LanguageManagerOptions> options)
     {
         services.Configure(options);
-         services.AddSingleton<ILocalization,Localization>();
-         services.AddSingleton<MultiLanguageMiddleware>();
+        services.AddSingleton<ILocalization, Localization>();
+        services.AddSingleton<MultiLanguageMiddleware>();
     }
-    
-    public static IApplicationBuilder  UseMultiLanguage(this IApplicationBuilder  app)
+
+    public static void UseMultiLanguage(this IApplicationBuilder app)
     {
-        return  app.UseMiddleware<MultiLanguageMiddleware>();
+        app.UseMiddleware<MultiLanguageMiddleware>();
     }
 }
 
-public class LanguageManagerOptions()
+public class LanguageManagerOptions
 {
     public bool ThrowExceptionIfResourceNotFound { get; set; }
     public required string ResourcesPath { get; set; }
-    public required IEnumerable<string> Cultures{ get; set; }
+    public required IEnumerable<string> Cultures { get; set; }
+    public required TimeSpan CacheExpiration { get; set; }
 }
 
 public interface ILocalization
 {
-    Dictionary<string, string> Get();
-    string Get(string key);
-    Dictionary<string, string> Get(IEnumerable<string> keys);
+    Task<Dictionary<string, string>> Get(CancellationToken ct);
+    Task<string> Get(string key, CancellationToken ct);
+    Task<Dictionary<string, string>> Get(IEnumerable<string> keys, CancellationToken ct);
 }
 
-public class Localization(IMemoryCache memoryCache ,IOptionsMonitor<LanguageManagerOptions> options) : ILocalization
+public class Localization(HybridCache cache, IOptionsMonitor<LanguageManagerOptions> options) : ILocalization
 {
-    public Dictionary<string, string> Get()
+    private readonly HybridCache _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+
+    public async Task<Dictionary<string, string>> Get(CancellationToken ct)
     {
-        return GetAllString();
+        return await GetAllString(ct);
     }
-    
-    public string Get(string key)
+
+    public async Task<string> Get(string key, CancellationToken ct)
     {
-        var result = GetAllString();
+        var result = await GetAllString(ct);
         return result.TryGetValue(key, out var value) ? value : string.Empty;
     }
-    
-    public Dictionary<string, string> Get(IEnumerable<string> keys)
+
+    public async Task<Dictionary<string, string>> Get(IEnumerable<string> keys, CancellationToken ct)
     {
-        var result = GetAllString();
-        return result.Where(r=>keys.Any(k=>k.Equals(r.Key))).ToDictionary(r=>r.Key, r=>r.Value);
+        var result = await GetAllString(ct);
+        return result.Where(r => keys.Any(k => k.Equals(r.Key))).ToDictionary(r => r.Key, r => r.Value);
     }
-    
-    private Dictionary<string,string> GetAllString()
+
+    private async Task<Dictionary<string, string>> GetAllString(CancellationToken ct)
     {
         var culture = Thread.CurrentThread.CurrentCulture;
 
         string cacheKey = $"{culture}-LANGUAGE-CACHE-KEY";
 
-        return memoryCache.GetOrCreate(cacheKey, entry =>
-        {
-            entry.SetOptions(new MemoryCacheEntryOptions().SetSlidingExpiration(TimeSpan.FromMinutes(10)));
-          return  GetResource(culture.ToString());
-        })!;
+        return await _cache.GetOrCreateAsync(cacheKey, async c => await GetResource(culture.ToString(), c),
+            new HybridCacheEntryOptions()
+            {
+                Expiration = options.CurrentValue.CacheExpiration
+            }, cancellationToken: ct);
     }
 
-    private Dictionary<string, string> GetResource(string culture)
+    private async Task<Dictionary<string, string>> GetResource(string culture, CancellationToken ct)
     {
         string path = Path.Combine(options.CurrentValue.ResourcesPath, $"{culture}.json");
 
         if (!File.Exists(path))
-        { 
-            if(options.CurrentValue.ThrowExceptionIfResourceNotFound)
+        {
+            if (options.CurrentValue.ThrowExceptionIfResourceNotFound)
                 throw new FileNotFoundException("Resource not found", path);
-            
+
             return new Dictionary<string, string>();
         }
 
-        string json = File.ReadAllText(path);
+        var json = await File.ReadAllTextAsync(path, ct);
 
-        Dictionary<string, string> dic = JsonSerializer.Deserialize<Dictionary<string, string>>(json)!;
-        
-        return dic;
+        return JsonSerializer.Deserialize<Dictionary<string, string>>(json)!;
     }
 }
 
@@ -91,17 +92,16 @@ public class MultiLanguageMiddleware : IMiddleware
     public async Task InvokeAsync(HttpContext context, RequestDelegate next)
     {
         var cultureKey = context.Request.Headers["Accept-Language"];
-        if (!string.IsNullOrEmpty(cultureKey))
+        if (!string.IsNullOrEmpty(cultureKey) && DoesCultureExist(cultureKey!))
         {
-            if (DoesCultureExist(cultureKey))
-            {
-                var culture = new CultureInfo(cultureKey);
-                Thread.CurrentThread.CurrentCulture = culture;
-                Thread.CurrentThread.CurrentUICulture = culture;
-            }
+            var culture = new CultureInfo(cultureKey!);
+            Thread.CurrentThread.CurrentCulture = culture;
+            Thread.CurrentThread.CurrentUICulture = culture;
         }
+
         await next(context);
     }
+
     private static bool DoesCultureExist(string cultureName)
     {
         return CultureInfo.GetCultures(CultureTypes.AllCultures)
